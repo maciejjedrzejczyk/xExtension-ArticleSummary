@@ -4,26 +4,172 @@ $oai_key = FreshRSS_Context::$user_conf->oai_key;
 $oai_model = FreshRSS_Context::$user_conf->oai_model;
 $oai_prompt = FreshRSS_Context::$user_conf->oai_prompt;
 $oai_provider = FreshRSS_Context::$user_conf->oai_provider ?: 'openai'; // Default to OpenAI
+$oai_auto_summarize = FreshRSS_Context::$user_conf->oai_auto_summarize ?: 'manual'; // Default to manual
 ?>
 
-<form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
-  <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
-  <label for="oai_provider">Choose AI Provider</label>
-  <select name="oai_provider">
-      <option value="openai" <?php echo ($oai_provider == 'openai' ? 'selected' : ''); ?>>OpenAI</option>
-      <option value="ollama" <?php echo ($oai_provider == 'ollama' ? 'selected' : ''); ?>>Ollama</option>
-   </select>
- 
- <div id="common_config">
-    <label for="oai_url">Base URL (http(s)://oai.com/) without 'v1'</label>
-    <input type="text" name="oai_url" id="oai_url" value="<?php echo $oai_url; ?>">
-    <label for="oai_key">API Key</label>
-    <input type="text" name="oai_key" id="oai_key" value="<?php echo $oai_key; ?>">
-    <label for="oai_model">Model Name</label>
-    <input type="text" name="oai_model" id="oai_model" value="<?php echo $oai_model; ?>">
-    <label for="oai_prompt">Prompt (add before content)</label>
-    <textarea name="oai_prompt" id="oai_prompt"><?php echo $oai_prompt; ?></textarea>
+<div class="post">
+  <h2>Article Summary Configuration</h2>
+  
+  <form action="<?php echo _url('extension', 'configure', 'e', urlencode($this->getName())); ?>" method="post">
+    <input type="hidden" name="_csrf" value="<?php echo FreshRSS_Auth::csrfToken(); ?>" />
+    
+    <fieldset>
+      <legend>AI Provider Settings</legend>
+      
+      <div class="form-group">
+        <label for="oai_provider">Choose AI Provider:</label>
+        <select name="oai_provider" id="oai_provider">
+          <option value="openai" <?php echo ($oai_provider == 'openai' ? 'selected' : ''); ?>>OpenAI</option>
+          <option value="lmstudio" <?php echo ($oai_provider == 'lmstudio' ? 'selected' : ''); ?>>LMStudio</option>
+          <option value="ollama" <?php echo ($oai_provider == 'ollama' ? 'selected' : ''); ?>>Ollama</option>
+        </select>
+        <small>Select your local or remote AI service provider</small>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Summarization Mode</legend>
+      
+      <div class="form-group">
+        <label for="oai_auto_summarize">Summarization Mode:</label>
+        <select name="oai_auto_summarize" id="oai_auto_summarize">
+          <option value="manual" <?php echo ($oai_auto_summarize == 'manual' ? 'selected' : ''); ?>>Manual (Click button to summarize)</option>
+          <option value="automatic" <?php echo ($oai_auto_summarize == 'automatic' ? 'selected' : ''); ?>>Automatic (Summarize immediately when article opens)</option>
+        </select>
+        <small>
+          <strong>Manual:</strong> Shows a "Summarize" button that you click to generate summaries<br>
+          <strong>Automatic:</strong> Automatically generates summaries when you open articles (may increase API usage)
+        </small>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Connection Settings</legend>
+      
+      <div class="form-group">
+        <label for="oai_url">Base URL:</label>
+        <input type="text" name="oai_url" id="oai_url" value="<?php echo htmlspecialchars($oai_url); ?>" placeholder="http://localhost:1234" />
+        <small>
+          Examples:<br>
+          • OpenAI: https://api.openai.com<br>
+          • LMStudio: http://localhost:1234<br>
+          • Ollama: http://localhost:11434
+        </small>
+      </div>
+
+      <div class="form-group">
+        <label for="oai_key">API Key:</label>
+        <input type="password" name="oai_key" id="oai_key" value="<?php echo htmlspecialchars($oai_key); ?>" placeholder="Optional for local services" />
+        <small>Required for OpenAI, optional for local services like LMStudio and Ollama</small>
+      </div>
+
+      <div class="form-group">
+        <label for="oai_model">Model Name:</label>
+        <input type="text" name="oai_model" id="oai_model" value="<?php echo htmlspecialchars($oai_model); ?>" placeholder="gpt-3.5-turbo" />
+        <small>
+          Examples:<br>
+          • OpenAI: gpt-3.5-turbo, gpt-4<br>
+          • LMStudio: Use the model name shown in LMStudio<br>
+          • Ollama: llama2, mistral, codellama
+        </small>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Summarization Settings</legend>
+      
+      <div class="form-group">
+        <label for="oai_prompt">System Prompt:</label>
+        <textarea name="oai_prompt" id="oai_prompt" rows="4" placeholder="You are a helpful assistant that summarizes articles..."><?php echo htmlspecialchars($oai_prompt); ?></textarea>
+        <small>This prompt will be sent to the AI to instruct how to summarize articles</small>
+      </div>
+    </fieldset>
+
+    <div class="form-group">
+      <button type="submit" class="btn btn-important">Save Configuration</button>
+    </div>
+  </form>
+
+  <div class="alert alert-info">
+    <h3>Setup Instructions:</h3>
+    <ul>
+      <li><strong>OpenAI:</strong> Get API key from OpenAI dashboard, use https://api.openai.com as base URL</li>
+      <li><strong>LMStudio:</strong> Start LMStudio server, use http://localhost:1234 (or your custom port)</li>
+      <li><strong>Ollama:</strong> Install and run Ollama, use http://localhost:11434 as base URL</li>
+    </ul>
+    
+    <h3>Automatic Mode Warning:</h3>
+    <p><strong>⚠️ Important:</strong> Automatic mode will generate summaries for every article you open, which may significantly increase your API usage and costs (especially with OpenAI). Use with caution!</p>
   </div>
-  <hr />
-  <button type="submit">Save</button>
-</form>
+</div>
+
+<style>
+.form-group {
+  margin-bottom: 1rem;
+}
+
+.form-group label {
+  display: block;
+  font-weight: bold;
+  margin-bottom: 0.25rem;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+  width: 100%;
+  max-width: 500px;
+  padding: 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.form-group small {
+  display: block;
+  color: #666;
+  font-size: 0.85em;
+  margin-top: 0.25rem;
+  line-height: 1.3;
+}
+
+fieldset {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+legend {
+  font-weight: bold;
+  padding: 0 0.5rem;
+}
+
+.alert {
+  padding: 1rem;
+  border-radius: 4px;
+  margin-top: 1rem;
+}
+
+.alert-info {
+  background-color: #e7f3ff;
+  border: 1px solid #b3d9ff;
+  color: #0066cc;
+}
+
+.btn {
+  padding: 0.75rem 1.5rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.btn-important {
+  background-color: #007cba;
+  color: white;
+}
+
+.btn-important:hover {
+  background-color: #005a87;
+}
+</style>

@@ -9,7 +9,21 @@ function configureSummarizeButtons() {
     for (var target = e.target; target && target != this; target = target.parentNode) {
       
       if (target.matches('.flux_header')) {
-        target.nextElementSibling.querySelector('.oai-summary-btn').innerHTML = 'Summarize'
+        const summaryBtn = target.nextElementSibling.querySelector('.oai-summary-btn');
+        if (summaryBtn) {
+          const autoMode = summaryBtn.dataset.auto;
+          if (autoMode === 'automatic') {
+            summaryBtn.innerHTML = 'Auto-summarizing...';
+            // Trigger automatic summarization after a short delay
+            setTimeout(() => {
+              if (summaryBtn.dataset.request) {
+                summarizeButtonClick(summaryBtn);
+              }
+            }, 500);
+          } else {
+            summaryBtn.innerHTML = 'Summarize';
+          }
+        }
       }
 
       if (target.matches('.oai-summary-btn')) {
@@ -22,32 +36,77 @@ function configureSummarizeButtons() {
       }
     }
   }, false);
+
+  // Handle automatic summarization for articles that are already visible
+  initializeVisibleArticles();
+}
+
+function initializeVisibleArticles() {
+  // Find all visible summary buttons and initialize them
+  const summaryButtons = document.querySelectorAll('.oai-summary-btn');
+  summaryButtons.forEach(button => {
+    const autoMode = button.dataset.auto;
+    const container = button.parentNode;
+    
+    if (autoMode === 'automatic') {
+      // Check if this article is currently visible/expanded
+      const article = button.closest('.flux');
+      if (article && !article.classList.contains('flux_header_only')) {
+        button.innerHTML = 'Auto-summarizing...';
+        // Trigger automatic summarization
+        setTimeout(() => {
+          if (button.dataset.request && !container.classList.contains('oai-loading')) {
+            summarizeButtonClick(button);
+          }
+        }, 1000);
+      } else {
+        button.innerHTML = 'Auto-summarize';
+      }
+    } else {
+      button.innerHTML = 'Summarize';
+    }
+  });
 }
 
 function setOaiState(container, statusType, statusMsg, summaryText) {
   const button = container.querySelector('.oai-summary-btn');
   const content = container.querySelector('.oai-summary-content');
-  // 根据 state 设置不同的状态
-  if (statusType === 1) {
+  const autoMode = button.dataset.auto;
+  
+  // Set different states based on statusType
+  if (statusType === 1) { // Loading
     container.classList.add('oai-loading');
     container.classList.remove('oai-error');
-    content.innerHTML = statusMsg;
+    content.innerHTML = statusMsg || 'Loading...';
     button.disabled = true;
-  } else if (statusType === 2) {
+    if (autoMode === 'automatic') {
+      button.innerHTML = 'Auto-summarizing...';
+    } else {
+      button.innerHTML = 'Summarizing...';
+    }
+  } else if (statusType === 2) { // Error
     container.classList.remove('oai-loading');
     container.classList.add('oai-error');
-    content.innerHTML = statusMsg;
+    content.innerHTML = statusMsg || 'Error occurred';
     button.disabled = false;
-  } else {
+    if (autoMode === 'automatic') {
+      button.innerHTML = 'Auto-summarize (Error)';
+    } else {
+      button.innerHTML = 'Summarize (Retry)';
+    }
+  } else { // Success/Normal
     container.classList.remove('oai-loading');
     container.classList.remove('oai-error');
-    if (statusMsg === 'finish'){
+    if (statusMsg === 'finish') {
       button.disabled = false;
+      if (autoMode === 'automatic') {
+        button.innerHTML = 'Auto-summarized ✓';
+      } else {
+        button.innerHTML = 'Summarized ✓';
+      }
     }
   }
 
-  console.log(content);
-  
   if (summaryText) {
     content.innerHTML = summaryText.replace(/(?:\r\n|\r|\n)/g, '<br>');
   }
@@ -59,9 +118,9 @@ async function summarizeButtonClick(target) {
     return;
   }
 
-  setOaiState(container, 1, '加载中', null);
+  setOaiState(container, 1, 'Loading...', null);
 
-  // 这是 php 获取参数的地址 - This is the address where PHP gets the parameters
+  // Get the PHP endpoint URL
   var url = target.dataset.request;
   var data = {
     ajax: true,
@@ -76,50 +135,73 @@ async function summarizeButtonClick(target) {
     });
 
     const xresp = response.data;
-    console.log(xresp);
+    console.log('PHP Response:', xresp);
 
     if (response.status !== 200 || !xresp.response || !xresp.response.data) {
-      throw new Error('请求失败 / Request Failed');
+      throw new Error('Request failed - Invalid response from server');
     }
 
     if (xresp.response.error) {
       setOaiState(container, 2, xresp.response.data, null);
+      return;
+    }
+
+    // Parse parameters returned by PHP
+    const oaiParams = xresp.response.data;
+    const oaiProvider = xresp.response.provider;
+    
+    console.log('Provider:', oaiProvider, 'Params:', oaiParams);
+    
+    if (oaiProvider === 'ollama') {
+      await sendOllamaRequest(container, oaiParams);
     } else {
-      // 解析 PHP 返回的参数
-      const oaiParams = xresp.response.data;
-      const oaiProvider = xresp.response.provider;
-      if (oaiProvider === 'openai') {
-        await sendOpenAIRequest(container, oaiParams);
-      } else {
-        await sendOllamaRequest(container, oaiParams);
-      }
+      // Default to OpenAI-compatible (includes OpenAI and LMStudio)
+      await sendOpenAIRequest(container, oaiParams);
     }
   } catch (error) {
-    console.error(error);
-    setOaiState(container, 2, '请求失败 / Request Failed', null);
+    console.error('Request error:', error);
+    setOaiState(container, 2, 'Request failed: ' + error.message, null);
   }
 }
 
 async function sendOpenAIRequest(container, oaiParams) {
   try {
-    let body = JSON.parse(JSON.stringify(oaiParams));
-    delete body['oai_url'];
-    delete body['oai_key'];	  
+    setOaiState(container, 1, 'Connecting to AI service...', null);
+    
+    // Prepare request body (remove URL and key from body)
+    let requestBody = { ...oaiParams };
+    delete requestBody.oai_url;
+    delete requestBody.oai_key;
+
+    console.log('OpenAI Request URL:', oaiParams.oai_url);
+    console.log('OpenAI Request Body:', requestBody);
+
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    // Add authorization header if API key is provided
+    if (oaiParams.oai_key && oaiParams.oai_key.trim() !== '') {
+      headers['Authorization'] = `Bearer ${oaiParams.oai_key}`;
+    }
+
     const response = await fetch(oaiParams.oai_url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${oaiParams.oai_key}`
-      },
-      body: JSON.stringify(body)
+      headers: headers,
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
-      throw new Error('请求失败 / Request Failed');
+      const errorText = await response.text();
+      console.error('OpenAI API Error:', response.status, errorText);
+      throw new Error(`API request failed (${response.status}): ${errorText}`);
     }
+
+    setOaiState(container, 1, 'Generating summary...', null);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
+    let fullText = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -129,34 +211,74 @@ async function sendOpenAIRequest(container, oaiParams) {
       }
 
       const chunk = decoder.decode(value, { stream: true });
-      const text = JSON.parse(chunk)?.choices[0]?.message?.content || ''
-      setOaiState(container, 0, null, marked.parse(text));
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.trim() === '') continue;
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6);
+          if (data === '[DONE]') {
+            setOaiState(container, 0, 'finish', null);
+            return;
+          }
+          
+          try {
+            const json = JSON.parse(data);
+            const content = json.choices?.[0]?.delta?.content || '';
+            if (content) {
+              fullText += content;
+              setOaiState(container, 0, null, marked.parse(fullText));
+            }
+          } catch (e) {
+            console.warn('Failed to parse streaming JSON:', e, 'Data:', data);
+          }
+        }
+      }
     }
   } catch (error) {
-    console.error(error);
-    setOaiState(container, 2, '请求失败 / Request Failed', null);
+    console.error('OpenAI request error:', error);
+    setOaiState(container, 2, 'AI service error: ' + error.message, null);
   }
 }
 
-
-async function sendOllamaRequest(container, oaiParams){
+async function sendOllamaRequest(container, oaiParams) {
   try {
+    setOaiState(container, 1, 'Connecting to Ollama...', null);
+    
+    console.log('Ollama Request URL:', oaiParams.oai_url);
+    console.log('Ollama Request Body:', oaiParams);
+
+    const headers = {
+      'Content-Type': 'application/json'
+    };
+
+    // Only add authorization if API key is provided and not empty
+    if (oaiParams.oai_key && oaiParams.oai_key.trim() !== '') {
+      headers['Authorization'] = `Bearer ${oaiParams.oai_key}`;
+    }
+
+    // Prepare request body (remove URL and key from body)
+    let requestBody = { ...oaiParams };
+    delete requestBody.oai_url;
+    delete requestBody.oai_key;
+
     const response = await fetch(oaiParams.oai_url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${oaiParams.oai_key}`
-      },
-      body: JSON.stringify(oaiParams)
+      headers: headers,
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
-      throw new Error('请求失败 / Request Failed');
+      const errorText = await response.text();
+      console.error('Ollama API Error:', response.status, errorText);
+      throw new Error(`Ollama request failed (${response.status}): ${errorText}`);
     }
-  
+
+    setOaiState(container, 1, 'Generating summary...', null);
+
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
-    let text = '';
+    let fullText = '';
     let buffer = '';
 
     while (true) {
@@ -165,27 +287,34 @@ async function sendOllamaRequest(container, oaiParams){
         setOaiState(container, 0, 'finish', null);
         break;
       }
+
       buffer += decoder.decode(value, { stream: true });
-      // Try to process complete JSON objects from the buffer
+      
+      // Process complete JSON objects from the buffer
       let endIndex;
       while ((endIndex = buffer.indexOf('\n')) !== -1) {
         const jsonString = buffer.slice(0, endIndex).trim();
-        try {
-          if (jsonString) {
+        if (jsonString) {
+          try {
             const json = JSON.parse(jsonString);
-            text += json.response
-            setOaiState(container, 0, null, marked.parse(text));
+            if (json.response) {
+              fullText += json.response;
+              setOaiState(container, 0, null, marked.parse(fullText));
+            }
+            if (json.done) {
+              setOaiState(container, 0, 'finish', null);
+              return;
+            }
+          } catch (e) {
+            console.warn('Failed to parse Ollama JSON:', e, 'JSON:', jsonString);
           }
-        } catch (e) {
-          // If JSON parsing fails, output the error and keep the chunk for future attempts
-          console.error('Error parsing JSON:', e, 'Chunk:', jsonString);
         }
         // Remove the processed part from the buffer
-        buffer = buffer.slice(endIndex + 1); // +1 to remove the newline character
+        buffer = buffer.slice(endIndex + 1);
       }
     }
   } catch (error) {
-    console.error(error);
-    setOaiState(container, 2, '请求失败 / Request Failed', null);
+    console.error('Ollama request error:', error);
+    setOaiState(container, 2, 'Ollama error: ' + error.message, null);
   }
 }

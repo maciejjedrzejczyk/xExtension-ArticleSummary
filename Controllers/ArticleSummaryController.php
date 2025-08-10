@@ -2,27 +2,73 @@
 
 class FreshExtension_ArticleSummary_Controller extends Minz_ActionController
 {
+  public function debugAction()
+  {
+    $this->view->_layout(false);
+    header('Content-Type: application/json');
+
+    $config = array(
+      'oai_url' => FreshRSS_Context::$user_conf->oai_url,
+      'oai_key' => FreshRSS_Context::$user_conf->oai_key ? '[SET]' : '[EMPTY]',
+      'oai_model' => FreshRSS_Context::$user_conf->oai_model,
+      'oai_prompt' => FreshRSS_Context::$user_conf->oai_prompt,
+      'oai_provider' => FreshRSS_Context::$user_conf->oai_provider ?: 'openai',
+      'oai_auto_summarize' => FreshRSS_Context::$user_conf->oai_auto_summarize ?: 'manual'
+    );
+
+    echo json_encode(array(
+      'config' => $config,
+      'status' => 200
+    ));
+    return;
+  }
+
   public function summarizeAction()
   {
     $this->view->_layout(false);
-    // 设置响应头为 JSON - Set response header to JSON
+    // Set response header to JSON
     header('Content-Type: application/json');
 
     $oai_url = FreshRSS_Context::$user_conf->oai_url;
     $oai_key = FreshRSS_Context::$user_conf->oai_key;
     $oai_model = FreshRSS_Context::$user_conf->oai_model;
     $oai_prompt = FreshRSS_Context::$user_conf->oai_prompt;
-    $oai_provider = FreshRSS_Context::$user_conf->oai_provider;
+    $oai_provider = FreshRSS_Context::$user_conf->oai_provider ?: 'openai';
 
-    if (
-      $this->isEmpty($oai_url)
-      || $this->isEmpty($oai_key)
-      || $this->isEmpty($oai_model)
-      || $this->isEmpty($oai_prompt)
-    ) {
+    // Debug logging - remove this after fixing
+    error_log("ArticleSummary Debug - Provider: " . $oai_provider);
+    error_log("ArticleSummary Debug - URL: " . ($oai_url ?: 'EMPTY'));
+    error_log("ArticleSummary Debug - Model: " . ($oai_model ?: 'EMPTY'));
+    error_log("ArticleSummary Debug - Prompt: " . (strlen($oai_prompt ?: '') > 0 ? 'SET' : 'EMPTY'));
+    error_log("ArticleSummary Debug - Key: " . (strlen($oai_key ?: '') > 0 ? 'SET' : 'EMPTY'));
+
+    // Validate configuration based on provider
+    $validation_errors = array();
+    
+    if ($this->isEmpty($oai_url)) {
+      $validation_errors[] = 'Base URL is required';
+    }
+    
+    if ($this->isEmpty($oai_model)) {
+      $validation_errors[] = 'Model name is required';
+    }
+    
+    if ($this->isEmpty($oai_prompt)) {
+      $validation_errors[] = 'System prompt is required';
+    }
+    
+    // Only require API key for OpenAI
+    if ($oai_provider === 'openai' && $this->isEmpty($oai_key)) {
+      $validation_errors[] = 'API key is required for OpenAI';
+    }
+
+    if (!empty($validation_errors)) {
+      $error_message = 'Configuration errors: ' . implode(', ', $validation_errors) . ' (Provider: ' . $oai_provider . ')';
+      error_log("ArticleSummary Validation Error: " . $error_message);
+      
       echo json_encode(array(
         'response' => array(
-          'data' => 'missing config',
+          'data' => $error_message,
           'error' => 'configuration'
         ),
         'status' => 200
@@ -35,65 +81,94 @@ class FreshExtension_ArticleSummary_Controller extends Minz_ActionController
     $entry = $entry_dao->searchById($entry_id);
 
     if ($entry === null) {
-      echo json_encode(array('status' => 404));
+      echo json_encode(array(
+        'response' => array(
+          'data' => 'Article not found',
+          'error' => 'not_found'
+        ),
+        'status' => 404
+      ));
       return;
     }
 
-    $content = $entry->content(); // 替换为你的文章内容 - Replace with article content
+    $content = $entry->content();
+    $markdown_content = $this->htmlToMarkdown($content);
 
-    // 处理 $oai_url
-    $oai_url = rtrim($oai_url, '/'); // 去除末尾的斜杠
-    if (!preg_match('/\/v\d+\/?$/', $oai_url)) {
-        $oai_url .= '/v1'; // 如果没有版本信息，则添加 /v1 - If there is no version information, add /v1
+    // Build response based on provider
+    if ($oai_provider === "ollama") {
+      $successResponse = $this->buildOllamaResponse($oai_url, $oai_key, $oai_model, $oai_prompt, $markdown_content);
+    } else {
+      // Default to OpenAI-compatible (includes OpenAI and LMStudio)
+      $provider_name = ($oai_provider === "lmstudio") ? "lmstudio" : "openai";
+      $successResponse = $this->buildOpenAIResponse($oai_url, $oai_key, $oai_model, $oai_prompt, $markdown_content, $provider_name);
     }
-    // Open AI Input
-    $successResponse = array(
+
+    echo json_encode($successResponse);
+    return;
+  }
+
+  private function buildOpenAIResponse($oai_url, $oai_key, $oai_model, $oai_prompt, $content, $provider_name = 'openai')
+  {
+    // Clean and build URL
+    $base_url = rtrim($oai_url, '/');
+    
+    // Check if URL already has version path
+    if (!preg_match('/\/v\d+$/', $base_url)) {
+      $base_url .= '/v1';
+    }
+    
+    $endpoint_url = $base_url . '/chat/completions';
+
+    return array(
       'response' => array(
         'data' => array(
-          // 判断url是否有版本结尾，如果有版本信息则不添加版本信息，如果没有则默认添加/v1 - Determine whether the URL ends with a version. If it does, no version information is added. If not, /v1 is added by default.
-          "oai_url" => $oai_url . '/chat/completions',
+          "oai_url" => $endpoint_url,
           "oai_key" => $oai_key,
           "model" => $oai_model,
-          "messages" => [
-            [
+          "messages" => array(
+            array(
               "role" => "system",
               "content" => $oai_prompt
-            ],
-            [
+            ),
+            array(
               "role" => "user",
-              "content" => "input: \n" . $this->htmlToMarkdown($content),
-            ]
-          ],
-          "max_tokens" => 2048, // 你可以根据需要调整总结的长度 - You can adjust the length of the summary as needed.
-          "temperature" => 0.7, // 你可以根据需要调整生成文本的随机性 - You can adjust the randomness/temperature of the generated text as needed
-          "n" => 1 // 生成一个总结 - Generate summary
+              "content" => $content
+            )
+          ),
+          "max_tokens" => 2048,
+          "temperature" => 0.7,
+          "stream" => true
         ),
-        'provider' => 'openai',
+        'provider' => $provider_name,
         'error' => null
       ),
       'status' => 200
     );
+  }
 
-    // Ollama API Input
-    if ($oai_provider === "ollama") {
-      $successResponse = array(
-        'response' => array(
-          'data' => array(
-            "oai_url" => rtrim($oai_url, '/') . '/api/generate',
-            "oai_key" => $oai_key,
-            "model" => $oai_model,
-            "system" => $oai_prompt,
-            "prompt" =>  $this->htmlToMarkdown($content),
-            "stream" => true,
-          ),
-          'provider' => 'ollama',
-          'error' => null
+  private function buildOllamaResponse($oai_url, $oai_key, $oai_model, $oai_prompt, $content)
+  {
+    // Clean URL and build Ollama endpoint
+    $base_url = rtrim($oai_url, '/');
+    $endpoint_url = $base_url . '/api/generate';
+
+    // Combine system prompt with content
+    $full_prompt = $oai_prompt . "\n\nArticle content:\n" . $content;
+
+    return array(
+      'response' => array(
+        'data' => array(
+          "oai_url" => $endpoint_url,
+          "oai_key" => $oai_key, // May be empty for Ollama
+          "model" => $oai_model,
+          "prompt" => $full_prompt,
+          "stream" => true
         ),
-        'status' => 200
-      );
-    }
-    echo json_encode($successResponse);
-    return;
+        'provider' => 'ollama',
+        'error' => null
+      ),
+      'status' => 200
+    );
   }
 
   private function isEmpty($item)

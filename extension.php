@@ -1,8 +1,6 @@
 <?php
 class ArticleSummaryExtension extends Minz_Extension
 {
-
-
   protected array $csp_policies = [
     'default-src' => '*',
   ];
@@ -27,9 +25,12 @@ class ArticleSummaryExtension extends Minz_Extension
       )
     ));
 
+    $auto_summarize = FreshRSS_Context::$user_conf->oai_auto_summarize ?: 'manual';
+    $auto_class = ($auto_summarize === 'automatic') ? ' oai-auto-summarize' : '';
+
     $entry->_content(
-      '<div class="oai-summary-wrap">'
-      . '<button data-request="' . $url_summary . '" class="oai-summary-btn"></button>'
+      '<div class="oai-summary-wrap' . $auto_class . '">'
+      . '<button data-request="' . $url_summary . '" class="oai-summary-btn" data-auto="' . $auto_summarize . '"></button>'
       . '<div class="oai-summary-content"></div>'
       . '</div>'
       . $entry->content()
@@ -44,7 +45,8 @@ class ArticleSummaryExtension extends Minz_Extension
       FreshRSS_Context::$user_conf->oai_key = Minz_Request::param('oai_key', '');
       FreshRSS_Context::$user_conf->oai_model = Minz_Request::param('oai_model', '');
       FreshRSS_Context::$user_conf->oai_prompt = Minz_Request::param('oai_prompt', '');
-      FreshRSS_Context::$user_conf->oai_provider = Minz_Request::param('oai_provider', '');
+      FreshRSS_Context::$user_conf->oai_provider = Minz_Request::param('oai_provider', 'openai');
+      FreshRSS_Context::$user_conf->oai_auto_summarize = Minz_Request::param('oai_auto_summarize', 'manual');
       FreshRSS_Context::$user_conf->save();
     }
   }

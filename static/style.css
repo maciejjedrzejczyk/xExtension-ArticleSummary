@@ -1,14 +1,81 @@
+/* Summary container */
 .oai-summary-wrap {
-  
   background: #f8f8f8;
   padding: 1em;
   margin-bottom: 2em;
   border: 1px solid #888;
+  border-radius: 5px;
 }
 
+/* Automatic mode styling */
+.oai-summary-wrap.oai-auto-summarize {
+  border-color: #007cba;
+  background-color: #f0f8ff;
+}
+
+/* Summary button */
 .oai-summary-btn {
   font-size: 1.2em;
   margin-bottom: 0.5em;
+  background-color: #007cba;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.oai-summary-btn:hover {
+  background-color: #005a87;
+}
+
+.oai-summary-btn:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+/* Automatic mode button styling */
+.oai-auto-summarize .oai-summary-btn {
+  background-color: #28a745;
+}
+
+.oai-auto-summarize .oai-summary-btn:hover {
+  background-color: #218838;
+}
+
+/* Loading state */
+.oai-loading .oai-summary-btn {
+  background-color: #ffc107;
+  color: #212529;
+}
+
+/* Error state */
+.oai-error .oai-summary-btn {
+  background-color: #dc3545;
+}
+
+.oai-error .oai-summary-content {
+  color: #dc3545;
+  font-weight: bold;
+}
+
+/* Summary content styling */
+.oai-summary-content {
+  margin-top: 10px;
+  padding: 10px;
+  background-color: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  line-height: 1.5;
+}
+
+.oai-summary-content:empty {
+  display: none;
+}
+
+/* Automatic mode content styling */
+.oai-auto-summarize .oai-summary-content {
+  border-color: #007cba;
 }
 
 .oai-summary-content h1,

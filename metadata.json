@@ -1,8 +1,8 @@
 {
   "name": "ArticleSummary",
-  "author": "Liang",
-  "description": "A powerful article summarization plugin for FreshRSS that allows users to generate summaries using a language model API conforming to the OpenAI API specification.",
-  "version": "0.1.2",
+  "author": "Liang (Enhanced for Local LLMs)",
+  "description": "A powerful article summarization plugin for FreshRSS that supports OpenAI, LMStudio, and Ollama with both manual and automatic summarization modes.",
+  "version": "0.3.0",
   "entrypoint": "ArticleSummary",
   "type": "user"
 }
